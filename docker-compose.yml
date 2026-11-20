@@ -1,0 +1,67 @@
+# Proyecto Final - Infraestructura Computacional
+# Prerrequisito en el anfitrión (RAID + LVM + ext4 ya montado):
+#   sudo mkdir -p /srv/datos/{app,archivos,bd}
+#   echo "<h1>Archivo de prueba reconocible</h1>" | sudo tee /srv/datos/archivos/index.html
+
+services:
+  # 1) APLICACIÓN: File Browser (gestor web de archivos con login).
+  #    Todo lo que se crea/sube desde la interfaz queda en /app/data (bind mount escribible).
+  app:
+    image: filebrowser/filebrowser:latest
+    container_name: infralab-app
+    environment:
+      FB_ROOT: /app/data                        # carpeta que administra la aplicación
+      FB_DATABASE: /app/data/.filebrowser.db    # usuarios y ajustes también persisten
+      FB_USERNAME: admin                        # usuario por defecto
+      FB_PASSWORD: Admin12345678!               # contraseña por defecto (mínimo 12 caracteres)
+      FB_PORT: "8000"
+      FB_ADDRESS: 0.0.0.0
+    ports:
+      - "8000:8000"
+    volumes:
+      - /srv/datos/app:/app/data          # escritura -> persistencia real
+    mem_limit: 128m                        # límite de RAM (prueba de recursos)
+    cpus: 0.50                             # límite de CPU
+    restart: unless-stopped
+    networks: [backend]
+
+  # 2) ARCHIVOS / SERVIDOR WEB: publica contenido en solo lectura (:ro).
+  archivos:
+    image: nginx:alpine
+    container_name: infralab-archivos
+    ports:
+      - "8080:80"
+    volumes:
+      - /srv/datos/archivos:/usr/share/nginx/html:ro   # solo lectura (seguridad)
+    mem_limit: 64m
+    cpus: 0.25
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks: [backend]
+
+  # 3) BASE DE DATOS (extensión opcional): datos en /srv/datos/bd.
+  bd:
+    image: postgres:16-alpine
+    container_name: infralab-bd
+    environment:
+      POSTGRES_USER: infralab
+      POSTGRES_PASSWORD: cambiar_esta_clave
+      POSTGRES_DB: proyecto
+      # Subcarpeta necesaria: un ext4 recién montado trae "lost+found" y initdb falla sin ella
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - /srv/datos/bd:/var/lib/postgresql/data
+    mem_limit: 256m
+    cpus: 0.50
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infralab -d proyecto"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
